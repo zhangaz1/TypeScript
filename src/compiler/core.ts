@@ -25,27 +25,81 @@ namespace ts {
     }
 
     /** ES6 Map interface, only read methods included. */
-    export interface ReadonlyMap<T> {
-        get(key: string): T | undefined;
-        has(key: string): boolean;
-        forEach(action: (value: T, key: string) => void): void;
+    export interface ReadonlyESMap<K, V> {
+        get(key: K): V | undefined;
+        has(key: K): boolean;
+        forEach(action: (value: V, key: K) => void): void;
         readonly size: number;
-        keys(): Iterator<string>;
-        values(): Iterator<T>;
-        entries(): Iterator<[string, T]>;
+        keys(): Iterator<K>;
+        values(): Iterator<V>;
+        entries(): Iterator<[K, V]>;
     }
 
     /** ES6 Map interface. */
-    export interface Map<T> extends ReadonlyMap<T> {
-        set(key: string, value: T): this;
-        delete(key: string): boolean;
+    export interface ESMap<K, V> extends ReadonlyESMap<K, V> {
+        set(key: K, value: V): this;
+        delete(key: K): boolean;
         clear(): void;
+    }
+
+    /** ES6 Map interface, only read methods included. */
+    export interface ReadonlyMap<T> extends ReadonlyESMap<string, T> {
+    }
+
+    /** ES6 Map interface. */
+    export interface Map<T> extends ESMap<string, T>, ReadonlyMap<T> {
     }
 
     /* @internal */
     export interface MapConstructor {
         // eslint-disable-next-line @typescript-eslint/prefer-function-type
-        new <T>(): Map<T>;
+        new <K, V>(): ESMap<K, V>;
+    }
+
+    export interface ReadonlySet<T> {
+        readonly size: number;
+        has(value: T): boolean;
+        forEach(action: (value: T, key: T) => void): void;
+        keys(): Iterator<T>;
+        values(): Iterator<T>;
+        entries(): Iterator<[T, T]>;
+    }
+
+    export interface Set<T> extends ReadonlySet<T> {
+        add(value: T): this;
+        delete(value: T): boolean;
+        clear(): void;
+    }
+
+    /* @internal */
+    export interface SetConstructor {
+        // eslint-disable-next-line @typescript-eslint/prefer-function-type
+        new <T>(): Set<T>;
+    }
+
+    export interface WeakMap<K extends object, V> {
+        get(key: K): V | undefined;
+        has(key: K): boolean;
+        set(key: K, value: V): this;
+        delete(key: K): boolean;
+    }
+
+    /* @internal */
+    export interface WeakMapConstructor {
+        // eslint-disable-next-line @typescript-eslint/prefer-function-type
+        new <K extends object, V>(): WeakMap<K, V>;
+    }
+
+    export interface WeakSet<T extends object> {
+        has(key: T): boolean;
+        add(key: T): this;
+        delete(key: T): boolean;
+    }
+
+    /* @internal */
+    export interface WeakSetConstructor {
+        // eslint-disable-next-line @typescript-eslint/prefer-function-type
+        new <T extends object>(): WeakSet<T>;
     }
 
     /** ES6 Iterator type. */
@@ -75,8 +129,12 @@ namespace ts {
 /* @internal */
 namespace ts {
     // Natives
-    // NOTE: This must be declared in a separate block from the one below so that we don't collide with the exported definition of `Map`.
-    declare const Map: (new <T>() => Map<T>) | undefined;
+    // NOTE: This must be declared in a separate block from the one below so that we don't collide with the exported definitions of `Map` and `Set`.
+
+    declare const Map: MapConstructor | undefined;
+    declare const Set: SetConstructor | undefined;
+    declare const WeakMap: WeakMapConstructor | undefined;
+    declare const WeakSet: WeakSetConstructor | undefined;
 
     /**
      * Returns the native Map implementation if it is available and compatible (i.e. supports iteration).
@@ -86,6 +144,29 @@ namespace ts {
         // eslint-disable-next-line no-in-operator
         return typeof Map !== "undefined" && "entries" in Map.prototype ? Map : undefined;
     }
+
+    /**
+     * Returns the native Set implementation if it is available and compatible (i.e. supports iteration).
+     */
+    export function tryGetNativeSet(): SetConstructor | undefined {
+        // Internet Explorer's Set doesn't support iteration, so don't use it.
+        // eslint-disable-next-line no-in-operator
+        return typeof Set !== "undefined" && "entries" in Set.prototype ? Set : undefined;
+    }
+
+    /**
+     * Returns the native WeakMap implementation if it is available.
+     */
+    export function tryGetNativeWeakMap(): WeakMapConstructor | undefined {
+        return typeof WeakMap !== "undefined" ? WeakMap : undefined;
+    }
+
+    /**
+     * Returns the native WeakSet implementation if it is available.
+     */
+    export function tryGetNativeWeakSet(): WeakSetConstructor | undefined {
+        return typeof WeakSet !== "undefined" ? WeakSet : undefined;
+    }
 }
 
 /* @internal */
@@ -93,21 +174,49 @@ namespace ts {
     export const emptyArray: never[] = [] as never[];
 
     export const Map: MapConstructor = tryGetNativeMap() || (() => {
-        // NOTE: createMapShim will be defined for typescriptServices.js but not for tsc.js, so we must test for it.
+        // NOTE: ts.createMapShim will be defined for typescriptServices.js but not for tsc.js, so we must test for it.
         if (typeof createMapShim === "function") {
             return createMapShim();
         }
         throw new Error("TypeScript requires an environment that provides a compatible native Map implementation.");
     })();
 
+    export const Set: SetConstructor = tryGetNativeSet() || (() => {
+        // NOTE: ts.createSetShim will be defined for typescriptServices.js but not for tsc.js, so we must test for it.
+        if (typeof createSetShim === "function") {
+            return createSetShim();
+        }
+        throw new Error("TypeScript requires an environment that provides a compatible native Set implementation.");
+    })();
+
+    export const WeakMap: WeakMapConstructor = tryGetNativeWeakMap() || (() => {
+        // NOTE: ts.createWeakMapShim will be defined for typescriptServices.js but not for tsc.js, so we must test for it.
+        if (typeof createWeakMapShim === "function") {
+            return createWeakMapShim();
+        }
+        throw new Error("TypeScript requires an environment that provides a compatible native WeakMap implementation.");
+    })();
+
+    export const WeakSet: WeakSetConstructor = tryGetNativeWeakSet() || (() => {
+        // NOTE: ts.createWeakSetShim will be defined for typescriptServices.js but not for tsc.js, so we must test for it.
+        if (typeof createWeakSetShim === "function") {
+            return createWeakSetShim();
+        }
+        throw new Error("TypeScript requires an environment that provides a compatible native WeakSet implementation.");
+    })();
+
     /** Create a new map. */
-    export function createMap<T>(): Map<T> {
-        return new Map<T>();
+    export function createMap<T>(): Map<T>;
+    export function createMap<K, V>(): ESMap<K, V>;
+    export function createMap<K, V>(): ESMap<K, V> {
+        return new Map<K, V>();
     }
 
     /** Create a new map from an array of entries. */
-    export function createMapFromEntries<T>(entries: [string, T][]): Map<T> {
-        const map = createMap<T>();
+    export function createMapFromEntries<T>(entries: readonly [string, T][]): Map<T>;
+    export function createMapFromEntries<K, V>(entries: readonly [K, V][]): ESMap<K, V>;
+    export function createMapFromEntries<K, V>(entries: readonly [K, V][]): ESMap<K, V> {
+        const map = createMap<K, V>();
         for (const [key, value] of entries) {
             map.set(key, value);
         }
@@ -116,7 +225,7 @@ namespace ts {
 
     /** Create a new map from a template object is provided, the map will copy entries from it. */
     export function createMapFromTemplate<T>(template: MapLike<T>): Map<T> {
-        const map: Map<T> = new Map<T>();
+        const map: Map<T> = new Map<string, T>();
 
         // Copies keys/values from template. Note that for..in will not throw if
         // template is undefined, and instead will just exit the loop.
@@ -127,6 +236,18 @@ namespace ts {
         }
 
         return map;
+    }
+
+    export function createSet<T>(): Set<T> {
+        return new Set<T>();
+    }
+
+    export function createSetFromValues<T>(values: readonly T[]): Set<T> {
+        const set = createSet<T>();
+        for (const value of values) {
+            set.add(value);
+        }
+        return set;
     }
 
     export function length(array: readonly any[] | undefined): number {
