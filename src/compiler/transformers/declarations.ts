@@ -849,11 +849,11 @@ namespace ts {
                         // A constructor declaration may not have a type annotation
                         const ctor = createSignatureDeclaration(
                             SyntaxKind.Constructor,
+                            ensureModifiers(input),
                             ensureTypeParams(input, input.typeParameters),
                             updateParamsList(input, input.parameters, ModifierFlags.None),
                             /*type*/ undefined
                         );
-                        ctor.modifiers = createNodeArray(ensureModifiers(input));
                         return cleanup(ctor);
                     }
                     case SyntaxKind.MethodDeclaration: {
@@ -862,12 +862,12 @@ namespace ts {
                         }
                         const sig = createSignatureDeclaration(
                             SyntaxKind.MethodSignature,
+                            ensureModifiers(input),
                             ensureTypeParams(input, input.typeParameters),
                             updateParamsList(input, input.parameters),
                             ensureType(input, input.type)
                         ) as MethodSignature;
                         sig.name = input.name;
-                        sig.modifiers = createNodeArray(ensureModifiers(input));
                         sig.questionToken = input.questionToken;
                         return cleanup(sig);
                     }
@@ -982,7 +982,9 @@ namespace ts {
                         return cleanup(updateFunctionTypeNode(input, visitNodes(input.typeParameters, visitDeclarationSubtree), updateParamsList(input, input.parameters), visitNode(input.type, visitDeclarationSubtree)));
                     }
                     case SyntaxKind.ConstructorType: {
-                        return cleanup(updateConstructorTypeNode(input, visitNodes(input.typeParameters, visitDeclarationSubtree), updateParamsList(input, input.parameters), visitNode(input.type, visitDeclarationSubtree)));
+                        return cleanup(updateConstructorTypeNode(input,
+                            ensureModifiers(input),
+                            visitNodes(input.typeParameters, visitDeclarationSubtree), updateParamsList(input, input.parameters), visitNode(input.type, visitDeclarationSubtree)));
                     }
                     case SyntaxKind.ImportType: {
                         if (!isLiteralImportTypeNode(input)) return cleanup(input);

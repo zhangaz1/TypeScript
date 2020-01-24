@@ -453,7 +453,7 @@ namespace ts {
         type: TypeNode | undefined,
         name: string | PropertyName,
         questionToken: QuestionToken | undefined) {
-        const node = createSignatureDeclaration(SyntaxKind.MethodSignature, typeParameters, parameters, type) as MethodSignature;
+        const node = createSignatureDeclaration(SyntaxKind.MethodSignature, /*modifiers*/ undefined, typeParameters, parameters, type) as MethodSignature;
         node.name = asName(name);
         node.questionToken = questionToken;
         return node;
@@ -651,19 +651,19 @@ namespace ts {
     }
 
     export function createCallSignature(typeParameters: readonly TypeParameterDeclaration[] | undefined, parameters: readonly ParameterDeclaration[], type: TypeNode | undefined) {
-        return createSignatureDeclaration(SyntaxKind.CallSignature, typeParameters, parameters, type) as CallSignatureDeclaration;
+        return createSignatureDeclaration(SyntaxKind.CallSignature, /*modifiers*/ undefined, typeParameters, parameters, type) as CallSignatureDeclaration;
     }
 
     export function updateCallSignature(node: CallSignatureDeclaration, typeParameters: NodeArray<TypeParameterDeclaration> | undefined, parameters: NodeArray<ParameterDeclaration>, type: TypeNode | undefined) {
-        return updateSignatureDeclaration(node, typeParameters, parameters, type);
+        return updateSignatureDeclaration(node, /*modifiers*/ undefined, typeParameters, parameters, type);
     }
 
-    export function createConstructSignature(typeParameters: readonly TypeParameterDeclaration[] | undefined, parameters: readonly ParameterDeclaration[], type: TypeNode | undefined) {
-        return createSignatureDeclaration(SyntaxKind.ConstructSignature, typeParameters, parameters, type) as ConstructSignatureDeclaration;
+    export function createConstructSignature(typeParameters: readonly TypeParameterDeclaration[] | undefined, parameters: readonly ParameterDeclaration[], type: TypeNode | undefined): ConstructSignatureDeclaration {
+        return createSignatureDeclaration(SyntaxKind.ConstructSignature, /*modifiers*/ undefined, typeParameters, parameters, type) as ConstructSignatureDeclaration;
     }
 
-    export function updateConstructSignature(node: ConstructSignatureDeclaration, typeParameters: NodeArray<TypeParameterDeclaration> | undefined, parameters: NodeArray<ParameterDeclaration>, type: TypeNode | undefined) {
-        return updateSignatureDeclaration(node, typeParameters, parameters, type);
+    export function updateConstructSignature(node: ConstructSignatureDeclaration, typeParameters: readonly TypeParameterDeclaration[] | undefined, parameters: readonly ParameterDeclaration[], type: TypeNode | undefined): ConstructSignatureDeclaration {
+        return updateSignatureDeclaration(node, /*modifiers*/ undefined, typeParameters, parameters, type);
     }
 
     export function createIndexSignature(
@@ -694,8 +694,9 @@ namespace ts {
     }
 
     /* @internal */
-    export function createSignatureDeclaration(kind: SyntaxKind, typeParameters: readonly TypeParameterDeclaration[] | undefined, parameters: readonly ParameterDeclaration[], type: TypeNode | undefined, typeArguments?: readonly TypeNode[] | undefined) {
+    export function createSignatureDeclaration(kind: SyntaxKind, modifiers: readonly Modifier[] | undefined, typeParameters: readonly TypeParameterDeclaration[] | undefined, parameters: readonly ParameterDeclaration[], type: TypeNode | undefined, typeArguments?: readonly TypeNode[] | undefined) {
         const node = createSynthesizedNode(kind) as SignatureDeclaration;
+        node.modifiers = asNodeArray(modifiers);
         node.typeParameters = asNodeArray(typeParameters);
         node.parameters = asNodeArray(parameters);
         node.type = type;
@@ -703,11 +704,12 @@ namespace ts {
         return node;
     }
 
-    function updateSignatureDeclaration<T extends SignatureDeclaration>(node: T, typeParameters: NodeArray<TypeParameterDeclaration> | undefined, parameters: NodeArray<ParameterDeclaration>, type: TypeNode | undefined): T {
-        return node.typeParameters !== typeParameters
+    function updateSignatureDeclaration<T extends SignatureDeclaration>(node: T, modifiers: readonly Modifier[] | undefined, typeParameters: readonly TypeParameterDeclaration[] | undefined, parameters: readonly ParameterDeclaration[], type: TypeNode | undefined): T {
+        return node.modifiers !== modifiers
+            || node.typeParameters !== typeParameters
             || node.parameters !== parameters
             || node.type !== type
-            ? updateNode(<T>createSignatureDeclaration(node.kind, typeParameters, parameters, type), node)
+            ? updateNode(<T>createSignatureDeclaration(node.kind, modifiers, typeParameters, parameters, type), node)
             : node;
     }
 
@@ -756,19 +758,50 @@ namespace ts {
     }
 
     export function createFunctionTypeNode(typeParameters: readonly TypeParameterDeclaration[] | undefined, parameters: readonly ParameterDeclaration[], type: TypeNode | undefined) {
-        return createSignatureDeclaration(SyntaxKind.FunctionType, typeParameters, parameters, type) as FunctionTypeNode;
+        return createSignatureDeclaration(SyntaxKind.FunctionType, /*modifiers*/ undefined, typeParameters, parameters, type) as FunctionTypeNode;
     }
 
     export function updateFunctionTypeNode(node: FunctionTypeNode, typeParameters: NodeArray<TypeParameterDeclaration> | undefined, parameters: NodeArray<ParameterDeclaration>, type: TypeNode | undefined) {
-        return updateSignatureDeclaration(node, typeParameters, parameters, type);
+        return updateSignatureDeclaration(node, /*modifiers*/ undefined, typeParameters, parameters, type);
     }
 
-    export function createConstructorTypeNode(typeParameters: readonly TypeParameterDeclaration[] | undefined, parameters: readonly ParameterDeclaration[], type: TypeNode | undefined) {
-        return createSignatureDeclaration(SyntaxKind.ConstructorType, typeParameters, parameters, type) as ConstructorTypeNode;
+    export function createConstructorTypeNode(modifiers: readonly Modifier[] | undefined, typeParameters: readonly TypeParameterDeclaration[] | undefined, parameters: readonly ParameterDeclaration[], type: TypeNode | undefined): ConstructorTypeNode;
+    export function createConstructorTypeNode(typeParameters: readonly TypeParameterDeclaration[] | undefined, parameters: readonly ParameterDeclaration[], type: TypeNode | undefined): ConstructorTypeNode;
+    export function createConstructorTypeNode(...args:
+        | [readonly Modifier[] | undefined, readonly TypeParameterDeclaration[] | undefined, readonly ParameterDeclaration[], TypeNode | undefined]
+        | [readonly TypeParameterDeclaration[] | undefined, readonly ParameterDeclaration[], TypeNode | undefined]
+    ) {
+        let modifiers: readonly Modifier[] | undefined;
+        let typeParameters: readonly TypeParameterDeclaration[] | undefined;
+        let parameters: readonly ParameterDeclaration[];
+        let type: TypeNode | undefined;
+        if (args.length === 4) {
+            [modifiers, typeParameters, parameters, type] = args;
+        }
+        else {
+            [typeParameters, parameters, type] = args;
+        }
+        return createSignatureDeclaration(SyntaxKind.ConstructorType, modifiers, typeParameters, parameters, type) as ConstructorTypeNode;
     }
 
-    export function updateConstructorTypeNode(node: ConstructorTypeNode, typeParameters: NodeArray<TypeParameterDeclaration> | undefined, parameters: NodeArray<ParameterDeclaration>, type: TypeNode | undefined) {
-        return updateSignatureDeclaration(node, typeParameters, parameters, type);
+    export function updateConstructorTypeNode(node: ConstructorTypeNode, modifiers: readonly Modifier[] | undefined, typeParameters: readonly TypeParameterDeclaration[] | undefined, parameters: readonly ParameterDeclaration[], type: TypeNode | undefined): ConstructorTypeNode;
+    export function updateConstructorTypeNode(node: ConstructorTypeNode, typeParameters: readonly TypeParameterDeclaration[] | undefined, parameters: readonly ParameterDeclaration[], type: TypeNode | undefined): ConstructorTypeNode;
+    export function updateConstructorTypeNode(node: ConstructorTypeNode, ...args:
+        | [readonly Modifier[] | undefined, readonly TypeParameterDeclaration[] | undefined, readonly ParameterDeclaration[], TypeNode | undefined]
+        | [readonly TypeParameterDeclaration[] | undefined, readonly ParameterDeclaration[], TypeNode | undefined]
+    ) {
+        let modifiers: readonly Modifier[] | undefined;
+        let typeParameters: readonly TypeParameterDeclaration[] | undefined;
+        let parameters: readonly ParameterDeclaration[];
+        let type: TypeNode | undefined;
+        if (args.length === 4) {
+            [modifiers, typeParameters, parameters, type] = args;
+        }
+        else {
+            [typeParameters, parameters, type] = args;
+            modifiers = node.modifiers;
+        }
+        return updateSignatureDeclaration(node, modifiers, typeParameters, parameters, type);
     }
 
     export function createTypeQueryNode(exprName: EntityName) {

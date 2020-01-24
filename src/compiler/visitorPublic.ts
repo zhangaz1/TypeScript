@@ -351,6 +351,7 @@ namespace ts {
 
             case SyntaxKind.ConstructorType:
                 return updateConstructorTypeNode(<ConstructorTypeNode>node,
+                    nodesVisitor((<ConstructorTypeNode>node).modifiers, visitor, isModifier),
                     nodesVisitor((<ConstructorTypeNode>node).typeParameters, visitor, isTypeParameterDeclaration),
                     nodesVisitor((<ConstructorTypeNode>node).parameters, visitor, isParameterDeclaration),
                     visitNode((<ConstructorTypeNode>node).type, visitor, isTypeNode));

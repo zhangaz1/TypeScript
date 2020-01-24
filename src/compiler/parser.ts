@@ -2998,10 +2998,24 @@ namespace ts {
             return finishNode(node);
         }
 
+        function parseModifiersForConstructorType(): NodeArray<Modifier> | undefined {
+            let modifiers: NodeArray<Modifier> | undefined;
+            if (token() === SyntaxKind.AbstractKeyword) {
+                const modifierStart = scanner.getStartPos();
+                const modifierKind = token();
+                nextToken();
+                const modifier = finishNode(<Modifier>createNode(modifierKind, modifierStart));
+                modifiers = createNodeArray<Modifier>([modifier], modifierStart);
+            }
+            return modifiers;
+        }
+
         function parseFunctionOrConstructorType(): TypeNode {
             const pos = getNodePos();
+            const modifiers = parseModifiersForConstructorType();
             const kind = parseOptional(SyntaxKind.NewKeyword) ? SyntaxKind.ConstructorType : SyntaxKind.FunctionType;
             const node = <FunctionOrConstructorTypeNode>createNodeWithJSDoc(kind, pos);
+            node.modifiers = modifiers;
             fillSignature(SyntaxKind.EqualsGreaterThanToken, SignatureFlags.Type, node);
             return finishNode(node);
         }
@@ -3286,6 +3300,16 @@ namespace ts {
             return token() === SyntaxKind.OpenParenToken && lookAhead(isUnambiguouslyStartOfFunctionType);
         }
 
+        function nextTokenIsNewKeyword(): boolean {
+            nextToken();
+            return token() === SyntaxKind.NewKeyword;
+        }
+
+        function isStartOfConstructorType(): boolean {
+            return token() === SyntaxKind.NewKeyword ||
+                token() === SyntaxKind.AbstractKeyword && lookAhead(nextTokenIsNewKeyword);
+        }
+
         function skipParameterStart(): boolean {
             if (isModifierKind(token())) {
                 // Skip modifiers
@@ -3371,7 +3395,7 @@ namespace ts {
         }
 
         function parseTypeWorker(noConditionalTypes?: boolean): TypeNode {
-            if (isStartOfFunctionType() || token() === SyntaxKind.NewKeyword) {
+            if (isStartOfFunctionType() || isStartOfConstructorType()) {
                 return parseFunctionOrConstructorType();
             }
             const type = parseUnionTypeOrHigher();
