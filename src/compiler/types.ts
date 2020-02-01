@@ -3137,20 +3137,7 @@ namespace ts {
         throwIfCancellationRequested(): void;
     }
 
-    /*@internal*/
-    export enum RefFileKind {
-        Import,
-        ReferenceFile,
-        TypeReferenceDirective
-    }
 
-    /*@internal*/
-    export interface RefFile {
-        referencedFileName: string;
-        kind: RefFileKind;
-        index: number;
-        file: Path;
-    }
 
     // TODO: This should implement TypeCheckerHost but that's an internal type.
     export interface Program extends ScriptReferenceHost {
@@ -3171,8 +3158,6 @@ namespace ts {
          */
         /* @internal */
         getMissingFilePaths(): readonly Path[];
-        /* @internal */
-        getRefFileMap(): MultiMap<RefFile> | undefined;
         /* @internal */
         getFilesByNameMap(): Map<SourceFile | false | undefined>;
 
@@ -3239,6 +3224,8 @@ namespace ts {
         /* @internal */ redirectTargetsMap: MultiMap<string>;
         /** Is the file emitted file */
         /* @internal */ isEmittedFile(file: string): boolean;
+        /* @internal */ getFileIncludeReasons(): MultiMap<FileIncludeReason>;
+        /* @internal */ getCanonicalFileName(fileName: string): string;
 
         /* @internal */ getResolvedModuleWithFailedLookupLocationsFromCache(moduleName: string, containingFile: string): ResolvedModuleWithFailedLookupLocations | undefined;
 
@@ -5067,6 +5054,7 @@ namespace ts {
         lib?: string[];
         /*@internal*/listEmittedFiles?: boolean;
         /*@internal*/listFiles?: boolean;
+        /*@internal*/explainFiles?: boolean;
         /*@internal*/listFilesOnly?: boolean;
         locale?: string;
         mapRoot?: string;
