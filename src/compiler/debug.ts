@@ -64,7 +64,7 @@ namespace ts {
                 stackCrawlMark || failBadSyntaxKind);
         }
 
-        export function assert(expression: boolean, message?: string, verboseDebugInfo?: string | (() => string), stackCrawlMark?: AnyFunction): asserts expression {
+        export function assert(expression: unknown, message?: string, verboseDebugInfo?: string | (() => string), stackCrawlMark?: AnyFunction): asserts expression {
             if (!expression) {
                 message = message ? `False expression: ${message}` : "False expression.";
                 if (verboseDebugInfo) {
@@ -166,7 +166,7 @@ namespace ts {
             }
         }
 
-        export function assertNotNode<T extends Node, U extends T>(node: T | undefined, test: (node: T) => node is U, message?: string, stackCrawlMark?: AnyFunction): asserts node is Exclude<T, U>;
+        export function assertNotNode<T extends Node, U extends T>(node: T | undefined, test: (node: Node) => node is U, message?: string, stackCrawlMark?: AnyFunction): asserts node is Exclude<T, U>;
         export function assertNotNode(node: Node | undefined, test: ((node: Node) => boolean) | undefined, message?: string, stackCrawlMark?: AnyFunction): void;
         export function assertNotNode(node: Node | undefined, test: ((node: Node) => boolean) | undefined, message?: string, stackCrawlMark?: AnyFunction) {
             if (shouldAssertFunction(AssertionLevel.Normal, "assertNotNode")) {
@@ -376,7 +376,7 @@ namespace ts {
                     Object.defineProperties(ctor.prototype, {
                         __debugKind: { get(this: Node) { return formatSyntaxKind(this.kind); } },
                         __debugNodeFlags: { get(this: Node) { return formatNodeFlags(this.flags); } },
-                        __debugModifierFlags: { get(this: Node) { return formatModifierFlags(getModifierFlagsNoCache(this)); } },
+                        __debugModifierFlags: { get(this: Node) { return formatModifierFlags(getEffectiveModifierFlagsNoCache(this)); } },
                         __debugTransformFlags: { get(this: Node) { return formatTransformFlags(this.transformFlags); } },
                         __debugIsParseTreeNode: { get(this: Node) { return isParseTreeNode(this); } },
                         __debugEmitFlags: { get(this: Node) { return formatEmitFlags(getEmitFlags(this)); } },

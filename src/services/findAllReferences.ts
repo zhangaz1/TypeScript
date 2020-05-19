@@ -102,7 +102,7 @@ namespace ts.FindAllReferences {
             ((isImportOrExportSpecifier(node.parent) || isBindingElement(node.parent))
                 && node.parent.propertyName === node) ||
             // Is default export
-            (node.kind === SyntaxKind.DefaultKeyword && hasModifier(node.parent, ModifierFlags.ExportDefault))) {
+            (node.kind === SyntaxKind.DefaultKeyword && hasSyntacticModifier(node.parent, ModifierFlags.ExportDefault))) {
             return getContextNode(node.parent);
         }
 
@@ -216,7 +216,32 @@ namespace ts.FindAllReferences {
 
     export function getImplementationsAtPosition(program: Program, cancellationToken: CancellationToken, sourceFiles: readonly SourceFile[], sourceFile: SourceFile, position: number): ImplementationLocation[] | undefined {
         const node = getTouchingPropertyName(sourceFile, position);
-        const referenceEntries = getImplementationReferenceEntries(program, cancellationToken, sourceFiles, node, position);
+        let referenceEntries: Entry[] | undefined;
+        const entries = getImplementationReferenceEntries(program, cancellationToken, sourceFiles, node, position);
+
+        if (
+            node.parent.kind === SyntaxKind.PropertyAccessExpression
+            || node.parent.kind === SyntaxKind.BindingElement
+            || node.parent.kind === SyntaxKind.ElementAccessExpression
+            || node.kind === SyntaxKind.SuperKeyword
+        ) {
+            referenceEntries = entries && [...entries];
+        }
+        else {
+            const queue = entries && [...entries];
+            const seenNodes = createMap<true>();
+            while (queue && queue.length) {
+                const entry = queue.shift() as NodeEntry;
+                if (!addToSeen(seenNodes, getNodeId(entry.node))) {
+                    continue;
+                }
+                referenceEntries = append(referenceEntries, entry);
+                const entries = getImplementationReferenceEntries(program, cancellationToken, sourceFiles, entry.node, entry.node.pos);
+                if (entries) {
+                    queue.push(...entries);
+                }
+            }
+        }
         const checker = program.getTypeChecker();
         return map(referenceEntries, entry => toImplementationLocation(entry, checker));
     }
@@ -1121,7 +1146,7 @@ namespace ts.FindAllReferences {
 
             // If this is private property or method, the scope is the containing class
             if (flags & (SymbolFlags.Property | SymbolFlags.Method)) {
-                const privateDeclaration = find(declarations, d => hasModifier(d, ModifierFlags.Private) || isPrivateIdentifierPropertyDeclaration(d));
+                const privateDeclaration = find(declarations, d => hasEffectiveModifier(d, ModifierFlags.Private) || isPrivateIdentifierPropertyDeclaration(d));
                 if (privateDeclaration) {
                     return getAncestor(privateDeclaration, SyntaxKind.ClassDeclaration);
                 }
@@ -1174,16 +1199,16 @@ namespace ts.FindAllReferences {
         }
 
         /** Used as a quick check for whether a symbol is used at all in a file (besides its definition). */
-        export function isSymbolReferencedInFile(definition: Identifier, checker: TypeChecker, sourceFile: SourceFile): boolean {
-            return eachSymbolReferenceInFile(definition, checker, sourceFile, () => true) || false;
+        export function isSymbolReferencedInFile(definition: Identifier, checker: TypeChecker, sourceFile: SourceFile, searchContainer: Node = sourceFile): boolean {
+            return eachSymbolReferenceInFile(definition, checker, sourceFile, () => true, searchContainer) || false;
         }
 
-        export function eachSymbolReferenceInFile<T>(definition: Identifier, checker: TypeChecker, sourceFile: SourceFile, cb: (token: Identifier) => T): T | undefined {
+        export function eachSymbolReferenceInFile<T>(definition: Identifier, checker: TypeChecker, sourceFile: SourceFile, cb: (token: Identifier) => T, searchContainer: Node = sourceFile): T | undefined {
             const symbol = isParameterPropertyDeclaration(definition.parent, definition.parent.parent)
                 ? first(checker.getSymbolsOfParameterPropertyDeclaration(definition.parent, definition.text))
                 : checker.getSymbolAtLocation(definition);
             if (!symbol) return undefined;
-            for (const token of getPossibleSymbolReferenceNodes(sourceFile, symbol.name)) {
+            for (const token of getPossibleSymbolReferenceNodes(sourceFile, symbol.name, searchContainer)) {
                 if (!isIdentifier(token) || token === definition || token.escapedText !== definition.escapedText) continue;
                 const referenceSymbol: Symbol = checker.getSymbolAtLocation(token)!; // See GH#19955 for why the type annotation is necessary
                 if (referenceSymbol === symbol
@@ -1536,7 +1561,7 @@ namespace ts.FindAllReferences {
             Debug.assert(classLike.name === referenceLocation);
             const addRef = state.referenceAdder(search.symbol);
             for (const member of classLike.members) {
-                if (!(isMethodOrAccessor(member) && hasModifier(member, ModifierFlags.Static))) {
+                if (!(isMethodOrAccessor(member) && hasSyntacticModifier(member, ModifierFlags.Static))) {
                     continue;
                 }
                 if (member.body) {
@@ -1751,7 +1776,7 @@ namespace ts.FindAllReferences {
                 case SyntaxKind.Constructor:
                 case SyntaxKind.GetAccessor:
                 case SyntaxKind.SetAccessor:
-                    staticFlag &= getModifierFlags(searchSpaceNode);
+                    staticFlag &= getSyntacticModifierFlags(searchSpaceNode);
                     searchSpaceNode = searchSpaceNode.parent; // re-assign to be the owning class
                     break;
                 default:
@@ -1769,7 +1794,7 @@ namespace ts.FindAllReferences {
                 // If we have a 'super' container, we must have an enclosing class.
                 // Now make sure the owning class is the same as the search-space
                 // and has the same static qualifier as the original 'super's owner.
-                return container && (ModifierFlags.Static & getModifierFlags(container)) === staticFlag && container.parent.symbol === searchSpaceNode.symbol ? nodeEntry(node) : undefined;
+                return container && (ModifierFlags.Static & getSyntacticModifierFlags(container)) === staticFlag && container.parent.symbol === searchSpaceNode.symbol ? nodeEntry(node) : undefined;
             });
 
             return [{ definition: { type: DefinitionKind.Symbol, symbol: searchSpaceNode.symbol }, references }];
@@ -1797,7 +1822,7 @@ namespace ts.FindAllReferences {
                 case SyntaxKind.Constructor:
                 case SyntaxKind.GetAccessor:
                 case SyntaxKind.SetAccessor:
-                    staticFlag &= getModifierFlags(searchSpaceNode);
+                    staticFlag &= getSyntacticModifierFlags(searchSpaceNode);
                     searchSpaceNode = searchSpaceNode.parent; // re-assign to be the owning class
                     break;
                 case SyntaxKind.SourceFile:
@@ -1832,7 +1857,7 @@ namespace ts.FindAllReferences {
                         case SyntaxKind.ClassDeclaration:
                             // Make sure the container belongs to the same class
                             // and has the appropriate static modifier from the original container.
-                            return container.parent && searchSpaceNode.symbol === container.parent.symbol && (getModifierFlags(container) & ModifierFlags.Static) === staticFlag;
+                            return container.parent && searchSpaceNode.symbol === container.parent.symbol && (getSyntacticModifierFlags(container) & ModifierFlags.Static) === staticFlag;
                         case SyntaxKind.SourceFile:
                             return container.kind === SyntaxKind.SourceFile && !isExternalModule(<SourceFile>container) && !isParameterName(node);
                     }

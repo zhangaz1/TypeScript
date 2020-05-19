@@ -126,6 +126,7 @@ declare namespace FourSlashInterface {
         newLineCharacter?: string;
         convertTabsToSpaces?: boolean;
         indentStyle?: IndentStyle;
+        trimTrailingWhitespace?: boolean;
     }
     interface FormatCodeOptions extends EditorOptions {
         InsertSpaceAfterCommaDelimiter: boolean;
@@ -393,6 +394,8 @@ declare namespace FourSlashInterface {
         noMoveToNewFile(): void;
 
         generateTypes(...options: GenerateTypesOptions[]): void;
+
+        organizeImports(newContent: string): void;
     }
     class edit {
         backspace(count?: number): void;
@@ -751,6 +754,9 @@ declare namespace completion {
         GlobalsOrKeywords = "4",
         AutoImportSuggestions = "5",
         JavascriptIdentifiers = "6"
+    }
+    export const enum CompletionSource {
+        ThisProperty = "ThisProperty/"
     }
     export const globalThisEntry: Entry;
     export const undefinedVarEntry: Entry;

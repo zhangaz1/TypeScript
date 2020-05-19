@@ -42,6 +42,10 @@ namespace ts.OutliningElementsCollector {
                 addOutliningForLeadingCommentsForNode(n.parent.parent.parent, sourceFile, cancellationToken, out);
             }
 
+            if (isFunctionLike(n) && isBinaryExpression(n.parent) && isPropertyAccessExpression(n.parent.left)) {
+                addOutliningForLeadingCommentsForNode(n.parent.left, sourceFile, cancellationToken, out);
+            }
+
             const span = getOutliningSpanForNode(n, sourceFile);
             if (span) out.push(span);
 
@@ -199,7 +203,14 @@ namespace ts.OutliningElementsCollector {
             case SyntaxKind.InterfaceDeclaration:
             case SyntaxKind.EnumDeclaration:
             case SyntaxKind.CaseBlock:
+            case SyntaxKind.TypeLiteral:
+            case SyntaxKind.ObjectBindingPattern:
                 return spanForNode(n);
+            case SyntaxKind.TupleType:
+                return spanForNode(n, /*autoCollapse*/ false, /*useFullStart*/ !isTupleTypeNode(n.parent), SyntaxKind.OpenBracketToken);
+            case SyntaxKind.CaseClause:
+            case SyntaxKind.DefaultClause:
+                return spanForNodeArray((n as CaseClause | DefaultClause).statements);
             case SyntaxKind.ObjectLiteralExpression:
                 return spanForObjectOrArrayLiteral(n);
             case SyntaxKind.ArrayLiteralExpression:
@@ -214,6 +225,8 @@ namespace ts.OutliningElementsCollector {
             case SyntaxKind.TemplateExpression:
             case SyntaxKind.NoSubstitutionTemplateLiteral:
                 return spanForTemplateLiteral(<TemplateExpression | NoSubstitutionTemplateLiteral>n);
+            case SyntaxKind.ArrayBindingPattern:
+                return spanForNode(n, /*autoCollapse*/ false, /*useFullStart*/ !isBindingElement(n.parent), SyntaxKind.OpenBracketToken);
         }
 
         function spanForJSXElement(node: JsxElement): OutliningSpan | undefined {
@@ -255,6 +268,10 @@ namespace ts.OutliningElementsCollector {
             const openToken = findChildOfKind(n, open, sourceFile);
             const closeToken = findChildOfKind(n, close, sourceFile);
             return openToken && closeToken && spanBetweenTokens(openToken, closeToken, hintSpanNode, sourceFile, autoCollapse, useFullStart);
+        }
+
+        function spanForNodeArray(nodeArray: NodeArray<Node>): OutliningSpan | undefined {
+            return nodeArray.length ? createOutliningSpan(createTextSpanFromRange(nodeArray), OutliningSpanKind.Code) : undefined;
         }
     }
 

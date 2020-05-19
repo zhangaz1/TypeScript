@@ -179,7 +179,7 @@ namespace ts {
             case SyntaxKind.ArrayType:
                 return visitNode(cbNode, (<ArrayTypeNode>node).elementType);
             case SyntaxKind.TupleType:
-                return visitNodes(cbNode, cbNodes, (<TupleTypeNode>node).elementTypes);
+                return visitNodes(cbNode, cbNodes, (<TupleTypeNode>node).elements);
             case SyntaxKind.UnionType:
             case SyntaxKind.IntersectionType:
                 return visitNodes(cbNode, cbNodes, (<UnionOrIntersectionTypeNode>node).types);
@@ -207,6 +207,11 @@ namespace ts {
                     visitNode(cbNode, (<MappedTypeNode>node).type);
             case SyntaxKind.LiteralType:
                 return visitNode(cbNode, (<LiteralTypeNode>node).literal);
+            case SyntaxKind.NamedTupleMember:
+                return visitNode(cbNode, (<NamedTupleMember>node).dotDotDotToken) ||
+                    visitNode(cbNode, (<NamedTupleMember>node).name) ||
+                    visitNode(cbNode, (<NamedTupleMember>node).questionToken) ||
+                    visitNode(cbNode, (<NamedTupleMember>node).type);
             case SyntaxKind.ObjectBindingPattern:
             case SyntaxKind.ArrayBindingPattern:
                 return visitNodes(cbNode, cbNodes, (<BindingPattern>node).elements);
@@ -915,6 +920,7 @@ namespace ts {
 
         function clearState() {
             // Clear out the text the scanner is pointing at, so it doesn't keep anything alive unnecessarily.
+            scanner.clearCommentDirectives();
             scanner.setText("");
             scanner.setOnError(undefined);
 
@@ -948,6 +954,7 @@ namespace ts {
 
             setExternalModuleIndicator(sourceFile);
 
+            sourceFile.commentDirectives = scanner.getCommentDirectives();
             sourceFile.nodeCount = nodeCount;
             sourceFile.identifierCount = identifierCount;
             sourceFile.identifiers = identifiers;
@@ -1398,7 +1405,7 @@ namespace ts {
 
         function createNodeWithJSDoc(kind: SyntaxKind, pos?: number): Node {
             const node = createNode(kind, pos);
-            if (scanner.getTokenFlags() & TokenFlags.PrecedingJSDocComment) {
+            if (scanner.getTokenFlags() & TokenFlags.PrecedingJSDocComment && (kind !== SyntaxKind.ExpressionStatement || token() !== SyntaxKind.OpenParenToken)) {
                 addJSDocComment(<HasJSDoc>node);
             }
             return node;
@@ -3054,9 +3061,33 @@ namespace ts {
             return type;
         }
 
+        function isNextTokenColonOrQuestionColon() {
+            return nextToken() === SyntaxKind.ColonToken || (token() === SyntaxKind.QuestionToken && nextToken() === SyntaxKind.ColonToken);
+        }
+
+        function isTupleElementName() {
+            if (token() === SyntaxKind.DotDotDotToken) {
+                return tokenIsIdentifierOrKeyword(nextToken()) && isNextTokenColonOrQuestionColon();
+            }
+            return tokenIsIdentifierOrKeyword(token()) && isNextTokenColonOrQuestionColon();
+        }
+
+        function parseTupleElementNameOrTupleElementType() {
+            if (lookAhead(isTupleElementName)) {
+                const node = <NamedTupleMember>createNode(SyntaxKind.NamedTupleMember);
+                node.dotDotDotToken = parseOptionalToken(SyntaxKind.DotDotDotToken);
+                node.name = parseIdentifierName();
+                node.questionToken = parseOptionalToken(SyntaxKind.QuestionToken);
+                parseExpected(SyntaxKind.ColonToken);
+                node.type = parseTupleElementType();
+                return addJSDocComment(finishNode(node));
+            }
+            return parseTupleElementType();
+        }
+
         function parseTupleType(): TupleTypeNode {
             const node = <TupleTypeNode>createNode(SyntaxKind.TupleType);
-            node.elementTypes = parseBracketedList(ParsingContext.TupleElementTypes, parseTupleElementType, SyntaxKind.OpenBracketToken, SyntaxKind.CloseBracketToken);
+            node.elements = parseBracketedList(ParsingContext.TupleElementTypes, parseTupleElementNameOrTupleElementType, SyntaxKind.OpenBracketToken, SyntaxKind.CloseBracketToken);
             return finishNode(node);
         }
 
@@ -4543,7 +4574,11 @@ namespace ts {
                         parseErrorAtRange(openingTag, Diagnostics.JSX_fragment_has_no_corresponding_closing_tag);
                     }
                     else {
-                        parseErrorAtRange(openingTag.tagName, Diagnostics.JSX_element_0_has_no_corresponding_closing_tag, getTextOfNodeFromSourceText(sourceText, openingTag.tagName));
+                        // We want the error span to cover only 'Foo.Bar' in < Foo.Bar >
+                        // or to cover only 'Foo' in < Foo >
+                        const tag = openingTag.tagName;
+                        const start = skipTrivia(sourceText, tag.pos);
+                        parseErrorAt(start, tag.end, Diagnostics.JSX_element_0_has_no_corresponding_closing_tag, getTextOfNodeFromSourceText(sourceText, openingTag.tagName));
                     }
                     return undefined;
                 case SyntaxKind.LessThanSlashToken:
@@ -4752,12 +4787,34 @@ namespace ts {
                 && lookAhead(nextTokenIsIdentifierOrKeywordOrOpenBracketOrTemplate);
         }
 
+        function tryReparseOptionalChain(node: Expression) {
+            if (node.flags & NodeFlags.OptionalChain) {
+                return true;
+            }
+            // check for an optional chain in a non-null expression
+            if (isNonNullExpression(node)) {
+                let expr = node.expression;
+                while (isNonNullExpression(expr) && !(expr.flags & NodeFlags.OptionalChain)) {
+                    expr = expr.expression;
+                }
+                if (expr.flags & NodeFlags.OptionalChain) {
+                    // this is part of an optional chain. Walk down from `node` to `expression` and set the flag.
+                    while (isNonNullExpression(node)) {
+                        node.flags |= NodeFlags.OptionalChain;
+                        node = node.expression;
+                    }
+                    return true;
+                }
+            }
+            return false;
+        }
+
         function parsePropertyAccessExpressionRest(expression: LeftHandSideExpression, questionDotToken: QuestionDotToken | undefined) {
             const propertyAccess = <PropertyAccessExpression>createNode(SyntaxKind.PropertyAccessExpression, expression.pos);
             propertyAccess.expression = expression;
             propertyAccess.questionDotToken = questionDotToken;
             propertyAccess.name = parseRightSideOfDot(/*allowIdentifierNames*/ true, /*allowPrivateIdentifiers*/ true);
-            if (questionDotToken || expression.flags & NodeFlags.OptionalChain) {
+            if (questionDotToken || tryReparseOptionalChain(expression)) {
                 propertyAccess.flags |= NodeFlags.OptionalChain;
                 if (isPrivateIdentifier(propertyAccess.name)) {
                     parseErrorAtRange(propertyAccess.name, Diagnostics.An_optional_chain_cannot_contain_private_identifiers);
@@ -4783,7 +4840,7 @@ namespace ts {
             }
 
             parseExpected(SyntaxKind.CloseBracketToken);
-            if (questionDotToken || expression.flags & NodeFlags.OptionalChain) {
+            if (questionDotToken || tryReparseOptionalChain(expression)) {
                 indexedAccess.flags |= NodeFlags.OptionalChain;
             }
             return finishNode(indexedAccess);
@@ -4870,7 +4927,7 @@ namespace ts {
                         callExpr.questionDotToken = questionDotToken;
                         callExpr.typeArguments = typeArguments;
                         callExpr.arguments = parseArgumentList();
-                        if (questionDotToken || expression.flags & NodeFlags.OptionalChain) {
+                        if (questionDotToken || tryReparseOptionalChain(expression)) {
                             callExpr.flags |= NodeFlags.OptionalChain;
                         }
                         expression = finishNode(callExpr);
@@ -4882,7 +4939,7 @@ namespace ts {
                     callExpr.expression = expression;
                     callExpr.questionDotToken = questionDotToken;
                     callExpr.arguments = parseArgumentList();
-                    if (questionDotToken || expression.flags & NodeFlags.OptionalChain) {
+                    if (questionDotToken || tryReparseOptionalChain(expression)) {
                         callExpr.flags |= NodeFlags.OptionalChain;
                     }
                     expression = finishNode(callExpr);
@@ -5108,13 +5165,22 @@ namespace ts {
 
         function parseObjectLiteralExpression(): ObjectLiteralExpression {
             const node = <ObjectLiteralExpression>createNode(SyntaxKind.ObjectLiteralExpression);
+            const openBracePosition = scanner.getTokenPos();
             parseExpected(SyntaxKind.OpenBraceToken);
             if (scanner.hasPrecedingLineBreak()) {
                 node.multiLine = true;
             }
 
             node.properties = parseDelimitedList(ParsingContext.ObjectLiteralMembers, parseObjectLiteralElement, /*considerSemicolonAsDelimiter*/ true);
-            parseExpected(SyntaxKind.CloseBraceToken);
+            if (!parseExpected(SyntaxKind.CloseBraceToken)) {
+                const lastError = lastOrUndefined(parseDiagnostics);
+                if (lastError && lastError.code === Diagnostics._0_expected.code) {
+                    addRelatedInfo(
+                        lastError,
+                        createFileDiagnostic(sourceFile, openBracePosition, 1, Diagnostics.The_parser_expected_to_find_a_to_match_the_token_here)
+                    );
+                }
+            }
             return finishNode(node);
         }
 
@@ -5183,8 +5249,11 @@ namespace ts {
             const node = <NewExpression>createNode(SyntaxKind.NewExpression, fullStart);
             node.expression = expression;
             node.typeArguments = typeArguments;
-            if (node.typeArguments || token() === SyntaxKind.OpenParenToken) {
+            if (token() === SyntaxKind.OpenParenToken) {
                 node.arguments = parseArgumentList();
+            }
+            else if (node.typeArguments) {
+                parseErrorAt(fullStart, scanner.getStartPos(), Diagnostics.A_new_expression_with_type_arguments_must_always_be_followed_by_a_parenthesized_argument_list);
             }
             return finishNode(node);
         }
@@ -5467,7 +5536,7 @@ namespace ts {
             // Avoiding having to do the lookahead for a labeled statement by just trying to parse
             // out an expression, seeing if it is identifier and then seeing if it is followed by
             // a colon.
-            const node = <ExpressionStatement | LabeledStatement>createNodeWithJSDoc(SyntaxKind.Unknown);
+            const node = <ExpressionStatement | LabeledStatement>createNodeWithJSDoc(token() === SyntaxKind.Identifier ? SyntaxKind.Unknown : SyntaxKind.ExpressionStatement);
             const expression = allowInAnd(parseExpression);
             if (expression.kind === SyntaxKind.Identifier && parseOptional(SyntaxKind.ColonToken)) {
                 node.kind = SyntaxKind.LabeledStatement;
@@ -7443,6 +7512,14 @@ namespace ts {
                             }
                             if (child.kind === SyntaxKind.JSDocTypeTag) {
                                 if (childTypeTag) {
+                                    parseErrorAtCurrentToken(Diagnostics.A_JSDoc_typedef_comment_may_not_contain_multiple_type_tags);
+                                    const lastError = lastOrUndefined(parseDiagnostics);
+                                    if (lastError) {
+                                        addRelatedInfo(
+                                            lastError,
+                                            createDiagnosticForNode(sourceFile, Diagnostics.The_tag_was_first_specified_here)
+                                        );
+                                    }
                                     break;
                                 }
                                 else {
@@ -7712,7 +7789,6 @@ namespace ts {
             const incrementalSourceFile = <IncrementalNode><Node>sourceFile;
             Debug.assert(!incrementalSourceFile.hasBeenIncrementallyParsed);
             incrementalSourceFile.hasBeenIncrementallyParsed = true;
-
             const oldText = sourceFile.text;
             const syntaxCursor = createSyntaxCursor(sourceFile);
 
@@ -7765,8 +7841,66 @@ namespace ts {
             // will immediately bail out of walking any subtrees when we can see that their parents
             // are already correct.
             const result = Parser.parseSourceFile(sourceFile.fileName, newText, sourceFile.languageVersion, syntaxCursor, /*setParentNodes*/ true, sourceFile.scriptKind);
-
+            result.commentDirectives = getNewCommentDirectives(
+                sourceFile.commentDirectives,
+                result.commentDirectives,
+                changeRange.span.start,
+                textSpanEnd(changeRange.span),
+                delta,
+                oldText,
+                newText,
+                aggressiveChecks
+            );
             return result;
+        }
+
+        function getNewCommentDirectives(
+            oldDirectives: CommentDirective[] | undefined,
+            newDirectives: CommentDirective[] | undefined,
+            changeStart: number,
+            changeRangeOldEnd: number,
+            delta: number,
+            oldText: string,
+            newText: string,
+            aggressiveChecks: boolean
+        ): CommentDirective[] | undefined {
+            if (!oldDirectives) return newDirectives;
+            let commentDirectives: CommentDirective[] | undefined;
+            let addedNewlyScannedDirectives = false;
+            for (const directive of oldDirectives) {
+                const { range, type } = directive;
+                // Range before the change
+                if (range.end < changeStart) {
+                    commentDirectives = append(commentDirectives, directive);
+                }
+                else if (range.pos > changeRangeOldEnd) {
+                    addNewlyScannedDirectives();
+                    // Node is entirely past the change range.  We need to move both its pos and
+                    // end, forward or backward appropriately.
+                    const updatedDirective: CommentDirective = {
+                        range: { pos: range.pos + delta, end: range.end + delta },
+                        type
+                    };
+                    commentDirectives = append(commentDirectives, updatedDirective);
+                    if (aggressiveChecks) {
+                        Debug.assert(oldText.substring(range.pos, range.end) === newText.substring(updatedDirective.range.pos, updatedDirective.range.end));
+                    }
+                }
+                // Ignore ranges that fall in change range
+            }
+            addNewlyScannedDirectives();
+            return commentDirectives;
+
+            function addNewlyScannedDirectives() {
+                if (addedNewlyScannedDirectives) return;
+                addedNewlyScannedDirectives = true;
+                if (!commentDirectives) {
+                    commentDirectives = newDirectives;
+                }
+                else if (newDirectives) {
+                    commentDirectives.push(...newDirectives);
+                }
+            }
         }
 
         function moveElementEntirelyPastChangeRange(element: IncrementalElement, isArray: boolean, delta: number, oldText: string, newText: string, aggressiveChecks: boolean) {
